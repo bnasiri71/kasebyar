@@ -1,4 +1,4 @@
-name: Build Kasbyar APK
+name: Build Kasbyar Kotlin APK
 
 on:
   workflow_dispatch:
@@ -25,20 +25,20 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Install Android build tools
+      - name: Install Android SDK packages
         run: |
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Prepare project
+      - name: Extract Kotlin project
         run: |
-          unzip -o KasbyarAndroid.zip -d kasbyar_project
+          unzip -o KasbyarKotlin.zip -d kasbyar_project
 
       - name: Build APK
-        working-directory: kasbyar_project/KasbyarAndroid
+        working-directory: kasbyar_project/KasbyarKotlin
         run: gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kasbyar-APK
-          path: kasbyar_project/KasbyarAndroid/app/build/outputs/apk/debug/app-debug.apk
+          name: Kasbyar-Kotlin-APK
+          path: kasbyar_project/KasbyarKotlin/app/build/outputs/apk/debug/app-debug.apk
