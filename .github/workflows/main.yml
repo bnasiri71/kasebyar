@@ -7,7 +7,7 @@ jobs:
 build:
 runs-on: ubuntu-latest
 
-
+```
 steps:
   - name: Checkout
     uses: actions/checkout@v4
@@ -40,7 +40,6 @@ steps:
       rm -rf kasbyar_project
       mkdir -p kasbyar_project
       unzip -o KasbyarKotlin.zip -d kasbyar_project
-
       if [ -f kasbyar_project/settings.gradle ] || [ -f kasbyar_project/settings.gradle.kts ]; then
         echo "Project files are already at the root."
       else
