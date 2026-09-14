@@ -1,3 +1,4 @@
+```yaml
 name: Build Kasbyar Kotlin APK
 
 on:
@@ -26,12 +27,13 @@ jobs:
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          sdkmanager --version
+          find "$ANDROID_HOME" -name sdkmanager -type f
 
       - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Extract Kotlin project
         run: |
@@ -49,3 +51,4 @@ jobs:
         with:
           name: Kasbyar-APK
           path: kasbyar_project/app/build/outputs/apk/debug/app-debug.apk
+```
