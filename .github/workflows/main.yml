@@ -17,28 +17,36 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Gradle
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
+      - name: Check Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          sdkmanager --version
+
       - name: Install Android SDK packages
         run: |
+          yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Extract Kotlin project
         run: |
+          rm -rf kasbyar_project
+          mkdir -p kasbyar_project
           unzip -o KasbyarKotlin.zip -d kasbyar_project
 
       - name: Build APK
-        working-directory: kasbyar_project/KasbyarKotlin
-        run: gradle assembleDebug
+        working-directory: kasbyar_project
+        run: |
+          gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kasbyar-Kotlin-APK
-          path: kasbyar_project/KasbyarKotlin/app/build/outputs/apk/debug/app-debug.apk
+          name: Kasbyar-APK
+          path: kasbyar_project/app/build/outputs/apk/debug/app-debug.apk
+```
