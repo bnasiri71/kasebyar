@@ -22,12 +22,6 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Check Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          find "$ANDROID_HOME" -name sdkmanager -type f
-
       - name: Install Android SDK packages
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -39,22 +33,6 @@ jobs:
           rm -rf kasbyar_project
           mkdir -p kasbyar_project
           unzip -o KasbyarKotlin.zip -d kasbyar_project
-          if [ -f kasbyar_project/settings.gradle ] || [ -f kasbyar_project/settings.gradle.kts ]; then
-            echo "Project files are already at the root."
-          else
-            INNER_DIR=$(find kasbyar_project -mindepth 1 -maxdepth 1 -type d | head -n 1)
-            echo "Moving project from: $INNER_DIR"
-            cp -a "$INNER_DIR"/. kasbyar_project/
-          fi
-
-      - name: Verify Gradle project
-        working-directory: kasbyar_project
-        run: |
-          echo "Project root:"
-          pwd
-          echo "Files:"
-          ls -la
-          test -f settings.gradle || test -f settings.gradle.kts
 
       - name: Build APK
         working-directory: kasbyar_project
@@ -64,5 +42,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kasbyar-APK
+          name: Kasbyar-v4-APK
           path: kasbyar_project/app/build/outputs/apk/debug/app-debug.apk
