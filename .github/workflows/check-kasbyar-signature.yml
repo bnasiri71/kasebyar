@@ -1,1 +1,153 @@
+name: Check Kasbyar APK signing key
+on:
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  check-signatures:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download previous V4 APK artifact
+        id: oldapk
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: Kasbyar-v4-APK
+          path: old-apk
+          run-id: 36178165598
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Extract Kotlin project
+        run: |
+          rm -rf kasbyar_project
+          mkdir -p kasbyar_project
+          unzip -o KasbyarKotlin.zip -d kasbyar_project
+          if [ -f kasbyar_project/settings.gradle ] || [ -f kasbyar_project/settings.gradle.kts ]; then
+            echo "Project files are already at root."
+          else
+            INNER_DIR=$(find kasbyar_project -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            test -n "$INNER_DIR"
+            cp -a "$INNER_DIR"/. kasbyar_project/
+          fi
+          test -f kasbyar_project/settings.gradle || test -f kasbyar_project/settings.gradle.kts
+
+      - name: Inspect previous APK certificate
+        id: oldcert
+        continue-on-error: true
+        run: |
+          APK=$(find old-apk -type f -name '*.apk' | head -n 1)
+          if [ -z "$APK" ]; then
+            echo "Previous APK artifact was not available to this workflow." | tee old-certificate.txt
+            exit 1
+          fi
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" | tee old-certificate.txt
+          OLD_SHA=$(sed -n 's/.*certificate SHA-256 digest: //p' old-certificate.txt | head -n 1 | tr -d '[:space:]')
+          if [ -n "$OLD_SHA" ]; then echo "OLD_SHA=$OLD_SHA" >> "$GITHUB_ENV"; fi
+
+      - name: Build APK using KASBYAR_KEYSTORE_BASE64
+        id: mainkey
+        continue-on-error: true
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KASBYAR_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.KASBYAR_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KASBYAR_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KASBYAR_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Main signing secrets are incomplete; skipped." > main-key-result.txt
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/kasbyar-main.keystore"
+          cd kasbyar_project
+          KASBYAR_KEYSTORE_FILE="$RUNNER_TEMP/kasbyar-main.keystore" KASBYAR_KEYSTORE_PASSWORD="$STORE_PASSWORD" KASBYAR_KEY_ALIAS="$KEY_ALIAS" KASBYAR_KEY_PASSWORD="$KEY_PASSWORD" gradle clean assembleDebug --stacktrace
+          mkdir -p "$GITHUB_WORKSPACE/candidate-apks"
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/candidate-apks/kasbyar-main-key.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$GITHUB_WORKSPACE/candidate-apks/kasbyar-main-key.apk" | tee "$GITHUB_WORKSPACE/main-key-result.txt"
+          SHA=$(sed -n 's/.*certificate SHA-256 digest: //p' "$GITHUB_WORKSPACE/main-key-result.txt" | head -n 1 | tr -d '[:space:]')
+          if [ -n "$SHA" ]; then echo "MAIN_SHA=$SHA" >> "$GITHUB_ENV"; fi
+
+      - name: Build APK using KASEBYAR_KEYSTORE_B64
+        id: legacykey
+        continue-on-error: true
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KASEBYAR_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.KASBYAR_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KASBYAR_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KASBYAR_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Alternate keystore or signing secrets are incomplete; skipped." > legacy-key-result.txt
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/kasbyar-alternate.keystore"
+          cd kasbyar_project
+          KASBYAR_KEYSTORE_FILE="$RUNNER_TEMP/kasbyar-alternate.keystore" KASBYAR_KEYSTORE_PASSWORD="$STORE_PASSWORD" KASBYAR_KEY_ALIAS="$KEY_ALIAS" KASBYAR_KEY_PASSWORD="$KEY_PASSWORD" gradle clean assembleDebug --stacktrace
+          mkdir -p "$GITHUB_WORKSPACE/candidate-apks"
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/candidate-apks/kasbyar-alternate-key.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$GITHUB_WORKSPACE/candidate-apks/kasbyar-alternate-key.apk" | tee "$GITHUB_WORKSPACE/legacy-key-result.txt"
+          SHA=$(sed -n 's/.*certificate SHA-256 digest: //p' "$GITHUB_WORKSPACE/legacy-key-result.txt" | head -n 1 | tr -d '[:space:]')
+          if [ -n "$SHA" ]; then echo "ALTERNATE_SHA=$SHA" >> "$GITHUB_ENV"; fi
+
+      - name: Compare signatures and prepare report
+        if: always()
+        run: |
+          {
+            echo "Kasbyar APK signing-key comparison"
+            echo "Previous APK run: 36178165598"
+            echo
+            echo "Previous APK certificate:"
+            if [ -f old-certificate.txt ]; then cat old-certificate.txt; else echo "Previous APK certificate could not be read."; fi
+            echo
+            echo "Candidate using KASBYAR_KEYSTORE_BASE64:"
+            if [ -f main-key-result.txt ]; then cat main-key-result.txt; else echo "Candidate could not be built with the main keystore."; fi
+            echo
+            echo "Candidate using KASEBYAR_KEYSTORE_B64:"
+            if [ -f legacy-key-result.txt ]; then cat legacy-key-result.txt; else echo "Candidate could not be built with the alternate keystore."; fi
+            echo
+            if [ -n "${OLD_SHA:-}" ] && [ -n "${MAIN_SHA:-}" ] && [ "$OLD_SHA" = "$MAIN_SHA" ]; then
+              echo "RESULT: Main keystore matches the previous APK certificate."
+              cp candidate-apks/kasbyar-main-key.apk candidate-apks/kasbyar-matching-key.apk
+            elif [ -n "${OLD_SHA:-}" ] && [ -n "${ALTERNATE_SHA:-}" ] && [ "$OLD_SHA" = "$ALTERNATE_SHA" ]; then
+              echo "RESULT: Alternate keystore matches the previous APK certificate."
+              cp candidate-apks/kasbyar-alternate-key.apk candidate-apks/kasbyar-matching-key.apk
+            elif [ -n "${OLD_SHA:-}" ]; then
+              echo "RESULT: Neither tested keystore matches the previous APK certificate. Do not uninstall the installed app."
+            else
+              echo "RESULT: Previous APK certificate was unavailable, so an automatic match could not be determined. Do not uninstall the installed app."
+            fi
+          } | tee signature-report.txt
+
+      - name: Upload APK candidates and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kasbyar-signature-check-results
+          path: |
+            candidate-apks/*.apk
+            signature-report.txt
+            old-certificate.txt
+            main-key-result.txt
+            legacy-key-result.txt
+          if-no-files-found: warn
 
