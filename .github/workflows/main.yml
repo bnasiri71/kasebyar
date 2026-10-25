@@ -28,6 +28,14 @@ jobs:
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KASBYAR_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/kasbyar.keystore"
+          test -s "$RUNNER_TEMP/kasbyar.keystore"
+
       - name: Extract Kotlin project
         run: |
           rm -rf kasbyar_project
@@ -38,26 +46,32 @@ jobs:
             echo "Project files are already at root."
           else
             INNER_DIR=$(find kasbyar_project -mindepth 1 -maxdepth 1 -type d | head -n 1)
-            echo "Moving project from: $INNER_DIR"
+            test -n "$INNER_DIR"
             cp -a "$INNER_DIR"/. kasbyar_project/
           fi
 
       - name: Verify Gradle project
         working-directory: kasbyar_project
         run: |
-          echo "Project root:"
-          pwd
-          echo "Files:"
-          ls -la
           test -f settings.gradle || test -f settings.gradle.kts
+          test -f app/build.gradle || test -f app/build.gradle.kts
 
-      - name: Build APK
+      - name: Build signed APK
         working-directory: kasbyar_project
+        env:
+          KASBYAR_KEYSTORE_FILE: ${{ runner.temp }}/kasbyar.keystore
+          KASBYAR_KEYSTORE_PASSWORD: ${{ secrets.KASBYAR_KEYSTORE_PASSWORD }}
+          KASBYAR_KEY_ALIAS: ${{ secrets.KASBYAR_KEY_ALIAS }}
+          KASBYAR_KEY_PASSWORD: ${{ secrets.KASBYAR_KEY_PASSWORD }}
         run: |
+          test -n "$KASBYAR_KEYSTORE_PASSWORD"
+          test -n "$KASBYAR_KEY_ALIAS"
+          test -n "$KASBYAR_KEY_PASSWORD"
           gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kasbyar-v4-APK
+          name: Kasbyar-v5.0.1-Signed-APK
           path: kasbyar_project/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
